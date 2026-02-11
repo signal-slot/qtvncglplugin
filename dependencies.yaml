@@ -1,0 +1,4 @@
+dependencies:
+  ../qtbase:
+    ref: HEAD
+    required: true
