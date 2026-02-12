@@ -7,9 +7,14 @@
 #include "qvncglbackingstore.h"
 #include "qvncgl_p.h"
 
+#if defined(Q_OS_UNIX)
 #include <QtGui/private/qgenericunixfontdatabase_p.h>
 #include <QtGui/private/qgenericunixeventdispatcher_p.h>
 #include <QtGui/private/qdesktopunixservices_p.h>
+#elif defined(Q_OS_WIN)
+#include <QtGui/private/qfreetypefontdatabase_p.h>
+#include <QtCore/private/qeventdispatcher_win_p.h>
+#endif
 #include <QtGui/private/qguiapplication_p.h>
 #include <qpa/qplatforminputcontextfactory_p.h>
 #include <qpa/qplatforminputcontext.h>
@@ -24,7 +29,11 @@ using namespace Qt::StringLiterals;
 
 QVncGlIntegration::QVncGlIntegration(const QStringList &paramList)
     : m_paramList(paramList)
+#if defined(Q_OS_UNIX)
     , m_fontDb(new QGenericUnixFontDatabase)
+#elif defined(Q_OS_WIN)
+    , m_fontDb(new QFreeTypeFontDatabase)
+#endif
 {
     QRegularExpression portRx("port=(\\d+)"_L1);
     for (const QString &arg : paramList) {
@@ -85,7 +94,13 @@ QPlatformOpenGLContext *QVncGlIntegration::createPlatformOpenGLContext(QOpenGLCo
 
 QAbstractEventDispatcher *QVncGlIntegration::createEventDispatcher() const
 {
+#if defined(Q_OS_UNIX)
     return createUnixEventDispatcher();
+#elif defined(Q_OS_WIN)
+    return new QEventDispatcherWin32;
+#else
+    return nullptr;
+#endif
 }
 
 QPlatformFontDatabase *QVncGlIntegration::fontDatabase() const
@@ -95,8 +110,13 @@ QPlatformFontDatabase *QVncGlIntegration::fontDatabase() const
 
 QPlatformServices *QVncGlIntegration::services() const
 {
-    if (m_services.isNull())
+    if (m_services.isNull()) {
+#if defined(Q_OS_UNIX)
         m_services.reset(new QDesktopUnixServices);
+#else
+        m_services.reset(new QPlatformServices);
+#endif
+    }
     return m_services.data();
 }
 
