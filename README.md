@@ -9,13 +9,24 @@ Unlike the software-only VNC plugin in Qt, this plugin uses EGL pbuffer surfaces
 - GPU-accelerated rendering via EGL/OpenGL ES pbuffer surfaces
 - Full VNC server (RFB protocol 3.3) with keyboard and mouse input
 - Supports Qt Quick, Qt Widgets, and any Qt application using the OpenGL rendering backend
-- Configurable resolution and VNC port
+- Configurable VNC port and physical screen size
+- Screen automatically resizes to match the application window
 - Client-side cursor support
+- Cross-platform: Linux (native EGL) and Windows (EGL via ANGLE)
+
+## Supported Platforms
+
+| Platform | GPU Backend |
+|----------|-------------|
+| Linux | EGL with native OpenGL ES drivers |
+| Windows | EGL via ANGLE (OpenGL ES over Direct3D) |
 
 ## Requirements
 
-- Qt 6 (qtbase with OpenGL support)
+- Qt 6 (qtbase with OpenGL and EGL support)
 - EGL and OpenGL ES 2.0 capable GPU/driver
+  - Linux: Mesa or vendor EGL driver
+  - Windows: ANGLE (bundled with Qt)
 - Network access for VNC client connections
 
 ## Building
@@ -26,7 +37,7 @@ qt-cmake ..
 cmake --build .
 ```
 
-The plugin will be built as `libqvncgl.so` (or platform equivalent).
+The plugin will be built as `libqvncgl.so` (Linux) or `qvncgl.dll` (Windows).
 
 ## Usage
 
@@ -41,13 +52,16 @@ Run any Qt application with the `vncgl` platform:
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `port=N` | VNC server listen port | 5900 |
-| `size=WxH` | Screen resolution | 1024x768 |
-| `mmsize=WxH` | Physical screen size in mm | auto |
+| `size=WxH` | Initial screen resolution (resizes to match window) | 1024x768 |
+| `mmsize=WxH` | Physical screen size in mm | auto (96 dpi) |
 
 ### Examples
 
 ```bash
-# Run with custom port and resolution
+# Run with custom port
+./your_app -platform vncgl:port=5910
+
+# Run with explicit initial resolution
 ./your_app -platform vncgl:port=5910:size=1920x1080
 
 # Force OpenGL backend for apps that default to Vulkan

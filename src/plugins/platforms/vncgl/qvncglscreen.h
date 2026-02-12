@@ -39,6 +39,7 @@ public:
     QImage *image() { return &m_framebuffer; }
     void clearDirty() { dirtyRegion = QRegion(); }
 
+    void resize(const QSize &size);
     QPlatformOpenGLContext *createPlatformOpenGLContext(QOpenGLContext *context) const;
     void updateFromOpenGL();
     EGLSurface surface() const { return m_surface; }

@@ -11,6 +11,7 @@
 #include <QtGui/QSurfaceFormat>
 #include <QtGui/private/qeglconvenience_p.h>
 #include <QtGui/private/qeglplatformcontext_p.h>
+#include <qpa/qwindowsysteminterface.h>
 
 QT_BEGIN_NAMESPACE
 
@@ -88,6 +89,42 @@ bool QVncGlScreen::initialize()
     dirty = new QVncGlDirtyMapOptimized<quint32>(this);
     dirty->reset();
     return true;
+}
+
+void QVncGlScreen::resize(const QSize &size)
+{
+    if (size.isEmpty() || size == m_geometry.size())
+        return;
+
+    m_geometry = QRect(QPoint(0, 0), size);
+    m_physicalSize = QSizeF(size.width() / 96.0 * 25.4,
+                            size.height() / 96.0 * 25.4);
+
+    // Recreate EGL pbuffer surface
+    if (m_surface != EGL_NO_SURFACE) {
+        eglMakeCurrent(m_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        eglDestroySurface(m_display, m_surface);
+        m_surface = EGL_NO_SURFACE;
+    }
+
+    if (m_display != EGL_NO_DISPLAY && m_config) {
+        const EGLint pbufferAttribs[] = {
+            EGL_WIDTH, size.width(),
+            EGL_HEIGHT, size.height(),
+            EGL_NONE
+        };
+        m_surface = eglCreatePbufferSurface(m_display, m_config, pbufferAttribs);
+        if (m_surface == EGL_NO_SURFACE)
+            qWarning("vncgl: Failed to recreate EGL pbuffer surface for resize");
+    }
+
+    resizeFramebuffer();
+    delete dirty;
+    dirty = new QVncGlDirtyMapOptimized<quint32>(this);
+    dirty->reset();
+
+    if (QScreen *s = screen())
+        QWindowSystemInterface::handleScreenGeometryChange(s, m_geometry, m_geometry);
 }
 
 bool QVncGlScreen::initializeEgl()

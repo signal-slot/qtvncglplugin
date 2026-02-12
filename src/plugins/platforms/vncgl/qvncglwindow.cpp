@@ -20,13 +20,14 @@ QVncGlWindow::QVncGlWindow(QWindow *window, QVncGlScreen *screen)
     setGeometry(screen ? screen->geometry() : window->geometry());
 }
 
-void QVncGlWindow::setGeometry(const QRect &)
+void QVncGlWindow::setGeometry(const QRect &rect)
 {
     if (!m_screen)
         return;
-    const QRect rect = m_screen->geometry();
-    QWindowSystemInterface::handleGeometryChange(window(), rect);
-    QPlatformWindow::setGeometry(rect);
+    m_screen->resize(rect.size());
+    const QRect screenRect = m_screen->geometry();
+    QWindowSystemInterface::handleGeometryChange(window(), screenRect);
+    QPlatformWindow::setGeometry(screenRect);
 }
 
 QT_END_NAMESPACE
