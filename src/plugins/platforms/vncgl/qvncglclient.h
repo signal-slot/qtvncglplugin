@@ -36,6 +36,8 @@ public:
     void setDirtyCursor() { m_dirtyCursor = true; scheduleUpdate(); }
     QRegion dirtyRegion() const { return m_dirtyRegion; }
     inline bool isConnected() const { return m_state == Connected; }
+    inline bool supportsExtClipboard() const { return m_supportsExtClipboard; }
+    inline quint32 clientClipFormats() const { return m_clientClipFormats; }
 
     inline int clientBytesPerPixel() const {
         return m_pixelFormat.bitsPerPixel / 8;
@@ -77,6 +79,13 @@ private:
     void clientCutText();
     bool pixelConversionNeeded() const;
 
+    void handleExtClipboardMessage(const QByteArray &payload);
+    void handleExtClipCaps(quint32 flags, const QByteArray &payload);
+    void handleExtClipRequest(quint32 flags);
+    void handleExtClipPeek();
+    void handleExtClipNotify(quint32 flags);
+    void handleExtClipProvide(quint32 flags, const QByteArray &payload);
+
     QVncGlServer *m_server;
     QTcpSocket *m_clientSocket;
     QRfbEncoder *m_encoder;
@@ -106,6 +115,12 @@ private:
 #endif
     QRegion m_dirtyRegion;
     ProtocolVersion m_protocolVersion;
+
+    // Extended Clipboard
+    bool m_supportsExtClipboard = false;
+    quint32 m_clientClipFormats = 0;
+    quint32 m_clientClipActions = 0;
+    qint32 m_extClipPayloadPending = 0;
 };
 
 QT_END_NAMESPACE

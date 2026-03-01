@@ -36,6 +36,7 @@ target_link_libraries(QVncGlIntegrationPlugin PRIVATE
     Qt::OpenGL
     Qt::OpenGLPrivate
     EGL::EGL
+    ZLIB::ZLIB
 )
 
 install(TARGETS QVncGlIntegrationPlugin

@@ -15,6 +15,7 @@ QT_BEGIN_NAMESPACE
 
 Q_DECLARE_LOGGING_CATEGORY(lcVncGl)
 
+class QMimeData;
 class QTcpSocket;
 class QTcpServer;
 class QVncGlScreen;
@@ -24,6 +25,26 @@ class QVncGlClient;
 
 // This fits with the VNC hextile messages
 #define MAP_TILE_SIZE 16
+
+// Extended Clipboard Pseudo-Encoding (RFC 6143 extension)
+namespace ExtClipFormat {
+    constexpr quint32 Text = 0x01;
+    constexpr quint32 RTF  = 0x02;
+    constexpr quint32 HTML = 0x04;
+    constexpr quint32 DIB  = 0x08;
+    constexpr quint32 Mask = 0x0000FFFF;
+}
+
+namespace ExtClipAction {
+    constexpr quint32 Caps    = 0x01000000;
+    constexpr quint32 Request = 0x02000000;
+    constexpr quint32 Peek    = 0x04000000;
+    constexpr quint32 Notify  = 0x08000000;
+    constexpr quint32 Provide = 0x10000000;
+    constexpr quint32 Mask    = 0xFF000000;
+}
+
+constexpr qint32 ExtendedClipboardEncoding = static_cast<qint32>(0xC0A1E5CE);
 
 class QVncGlDirtyMap
 {
@@ -159,7 +180,7 @@ class QRfbClientCutText
 public:
     bool read(QTcpSocket *s);
 
-    quint32 length;
+    qint32 length;
 };
 
 class QRfbEncoder
@@ -360,6 +381,11 @@ public:
 
     void setDirty();
     void sendCutText(const QString &text);
+    void sendExtClipCaps(QVncGlClient *client);
+    void sendExtClipNotify(QVncGlClient *client, quint32 formats);
+    void sendExtClipRequest(QVncGlClient *client, quint32 formats);
+    void sendExtClipProvide(QVncGlClient *client, quint32 formats, const QMimeData *mimeData);
+    void sendClipboardToClients(const QMimeData *mimeData);
 
     inline QVncGlScreen* screen() const { return qvnc_screen; }
     inline QVncGlDirtyMap* dirtyMap() const { return qvnc_screen->dirty; }

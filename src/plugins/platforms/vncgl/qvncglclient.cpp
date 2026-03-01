@@ -3,9 +3,11 @@
 
 #include "qvncglclient.h"
 #include "qvncgl_p.h"
+#include "qvncglclipboard.h"
 
 #include <QtNetwork/QTcpSocket>
 #include <QtCore/QCoreApplication>
+#include <qendian.h>
 
 #include <qpa/qwindowsysteminterface.h>
 #include <qpa/qplatformintegration.h>
@@ -14,6 +16,8 @@
 #include <QtGui/qclipboard.h>
 #include <QtGui/private/qguiapplication_p.h>
 #include <QMimeData>
+
+#include <zlib.h>
 
 #ifdef Q_OS_WIN
 #include <winsock2.h>
@@ -478,7 +482,8 @@ void QVncGlClient::setEncodings()
         Hextile = 5,
         ZRLE = 16,
         Cursor = -239,
-        DesktopSize = -223
+        DesktopSize = -223,
+        ExtendedClipboard = ExtendedClipboardEncoding
     };
 
     if (m_encodingsPending && (unsigned)m_clientSocket->bytesAvailable() >=
@@ -519,12 +524,19 @@ void QVncGlClient::setEncodings()
             case DesktopSize:
                 m_supportDesktopSize = true;
                 break;
+            case ExtendedClipboard:
+                m_supportsExtClipboard = true;
+                qCDebug(lcVncGl, "QVncGlServer::setEncodings: client supports extended clipboard");
+                break;
             default:
                 break;
             }
         }
         m_handleMsg = false;
         m_encodingsPending = 0;
+
+        if (m_supportsExtClipboard)
+            m_server->sendExtClipCaps(this);
     }
 
     if (!m_encoder) {
@@ -593,24 +605,209 @@ void QVncGlClient::clientCutText()
 {
     QRfbClientCutText ev;
 
-    if (m_cutTextPending == 0 && ev.read(m_clientSocket)) {
-        m_cutTextPending = ev.length;
-        if (!m_cutTextPending)
-            m_handleMsg = false;
+    if (m_cutTextPending == 0 && m_extClipPayloadPending == 0 && ev.read(m_clientSocket)) {
+        if (ev.length < 0) {
+            // Extended clipboard: negative length
+            m_extClipPayloadPending = -ev.length;
+            if (!m_extClipPayloadPending)
+                m_handleMsg = false;
+        } else {
+            // Legacy clipboard: positive length
+            m_cutTextPending = ev.length;
+            if (!m_cutTextPending)
+                m_handleMsg = false;
+        }
     }
 
-    if (m_cutTextPending && m_clientSocket->bytesAvailable() >= m_cutTextPending) {
+    if (m_extClipPayloadPending > 0 && m_clientSocket->bytesAvailable() >= m_extClipPayloadPending) {
+        QByteArray payload(m_extClipPayloadPending, Qt::Uninitialized);
+        m_clientSocket->read(payload.data(), m_extClipPayloadPending);
+        m_extClipPayloadPending = 0;
+        m_handleMsg = false;
+
+        handleExtClipboardMessage(payload);
+        return;
+    }
+
+    if (m_cutTextPending > 0 && m_clientSocket->bytesAvailable() >= m_cutTextPending) {
         QByteArray textData(m_cutTextPending, Qt::Uninitialized);
         m_clientSocket->read(textData.data(), m_cutTextPending);
         m_cutTextPending = 0;
         m_handleMsg = false;
 
-        auto *clipboard = QGuiApplicationPrivate::platformIntegration()->clipboard();
+        auto *clipboard = dynamic_cast<QVncGlClipboard *>(
+            QGuiApplicationPrivate::platformIntegration()->clipboard());
         if (clipboard) {
             auto *mimeData = new QMimeData;
             mimeData->setText(QString::fromLatin1(textData));
-            clipboard->setMimeData(mimeData, QClipboard::Clipboard);
+            clipboard->setFromVncClient(mimeData, QClipboard::Clipboard);
         }
+    }
+}
+
+void QVncGlClient::handleExtClipboardMessage(const QByteArray &payload)
+{
+    if (payload.size() < 4) {
+        qWarning("QVncGlClient: extended clipboard payload too short");
+        return;
+    }
+
+    const quint32 flags = qFromBigEndian<quint32>(payload.constData());
+    const quint32 action = flags & ExtClipAction::Mask;
+
+    if (action & ExtClipAction::Caps)
+        handleExtClipCaps(flags, payload);
+    else if (action & ExtClipAction::Request)
+        handleExtClipRequest(flags);
+    else if (action & ExtClipAction::Peek)
+        handleExtClipPeek();
+    else if (action & ExtClipAction::Notify)
+        handleExtClipNotify(flags);
+    else if (action & ExtClipAction::Provide)
+        handleExtClipProvide(flags, payload);
+    else
+        qWarning("QVncGlClient: unknown extended clipboard action: 0x%08x", flags);
+}
+
+void QVncGlClient::handleExtClipCaps(quint32 flags, const QByteArray &payload)
+{
+    m_clientClipFormats = flags & ExtClipFormat::Mask;
+    m_clientClipActions = flags & ExtClipAction::Mask;
+
+    // Parse per-format max sizes (we don't enforce them but read to consume)
+    int offset = 4;
+    for (int bit = 0; bit < 16; ++bit) {
+        if (m_clientClipFormats & (1u << bit)) {
+            if (offset + 4 <= payload.size()) {
+                // quint32 maxSize = qFromBigEndian<quint32>(payload.constData() + offset);
+                offset += 4;
+            }
+        }
+    }
+    qCDebug(lcVncGl, "QVncGlClient: ext clip caps: formats=0x%04x actions=0x%08x",
+            m_clientClipFormats, m_clientClipActions);
+}
+
+void QVncGlClient::handleExtClipRequest(quint32 flags)
+{
+    const quint32 formats = flags & ExtClipFormat::Mask;
+    qCDebug(lcVncGl, "QVncGlClient: ext clip request for formats 0x%04x", formats);
+
+    auto *clipboard = dynamic_cast<QVncGlClipboard *>(
+        QGuiApplicationPrivate::platformIntegration()->clipboard());
+    if (!clipboard)
+        return;
+
+    const QMimeData *mimeData = clipboard->mimeData(QClipboard::Clipboard);
+    if (mimeData)
+        m_server->sendExtClipProvide(this, formats, mimeData);
+}
+
+void QVncGlClient::handleExtClipPeek()
+{
+    qCDebug(lcVncGl, "QVncGlClient: ext clip peek");
+    auto *clipboard = dynamic_cast<QVncGlClipboard *>(
+        QGuiApplicationPrivate::platformIntegration()->clipboard());
+    if (!clipboard)
+        return;
+
+    const QMimeData *mimeData = clipboard->mimeData(QClipboard::Clipboard);
+    if (!mimeData)
+        return;
+
+    quint32 formats = 0;
+    if (mimeData->hasText())
+        formats |= ExtClipFormat::Text;
+    if (mimeData->hasHtml())
+        formats |= ExtClipFormat::HTML;
+
+    if (formats)
+        m_server->sendExtClipNotify(this, formats);
+}
+
+void QVncGlClient::handleExtClipNotify(quint32 flags)
+{
+    const quint32 formats = flags & ExtClipFormat::Mask;
+    qCDebug(lcVncGl, "QVncGlClient: ext clip notify: formats=0x%04x", formats);
+
+    // Client says it has clipboard data — request Text and/or HTML
+    quint32 requestFormats = formats & (ExtClipFormat::Text | ExtClipFormat::HTML);
+    if (requestFormats)
+        m_server->sendExtClipRequest(this, requestFormats);
+}
+
+void QVncGlClient::handleExtClipProvide(quint32 flags, const QByteArray &payload)
+{
+    const quint32 formats = flags & ExtClipFormat::Mask;
+    qCDebug(lcVncGl, "QVncGlClient: ext clip provide: formats=0x%04x", formats);
+
+    if (payload.size() <= 4) {
+        qWarning("QVncGlClient: ext clip provide payload too short");
+        return;
+    }
+
+    // Decompress zlib data (payload after the 4-byte flags)
+    const QByteArray compressed = payload.mid(4);
+
+    // Estimate uncompressed size — start with 4x, grow if needed
+    QByteArray uncompressed;
+    uLongf uncompressedSize = compressed.size() * 4;
+    int attempts = 0;
+    int ret;
+    do {
+        uncompressed.resize(static_cast<int>(uncompressedSize));
+        ret = uncompress(reinterpret_cast<Bytef *>(uncompressed.data()), &uncompressedSize,
+                         reinterpret_cast<const Bytef *>(compressed.constData()),
+                         compressed.size());
+        if (ret == Z_BUF_ERROR) {
+            uncompressedSize *= 2;
+            ++attempts;
+        }
+    } while (ret == Z_BUF_ERROR && attempts < 10);
+
+    if (ret != Z_OK) {
+        qWarning("QVncGlClient: zlib uncompress failed: %d", ret);
+        return;
+    }
+    uncompressed.resize(static_cast<int>(uncompressedSize));
+
+    // Parse format data: for each format bit (low to high), U32 size + data
+    auto *mimeData = new QMimeData;
+    int offset = 0;
+    for (int bit = 0; bit < 16; ++bit) {
+        const quint32 fmt = 1u << bit;
+        if (!(formats & fmt))
+            continue;
+
+        if (offset + 4 > uncompressed.size()) {
+            qWarning("QVncGlClient: ext clip provide: truncated format data");
+            break;
+        }
+
+        const quint32 dataSize = qFromBigEndian<quint32>(uncompressed.constData() + offset);
+        offset += 4;
+
+        if (offset + static_cast<int>(dataSize) > uncompressed.size()) {
+            qWarning("QVncGlClient: ext clip provide: truncated format payload");
+            break;
+        }
+
+        const QByteArray fmtData = uncompressed.mid(offset, static_cast<int>(dataSize));
+        offset += static_cast<int>(dataSize);
+
+        if (fmt == ExtClipFormat::Text) {
+            mimeData->setText(QString::fromUtf8(fmtData));
+        } else if (fmt == ExtClipFormat::HTML) {
+            mimeData->setHtml(QString::fromUtf8(fmtData));
+        }
+    }
+
+    auto *clipboard = dynamic_cast<QVncGlClipboard *>(
+        QGuiApplicationPrivate::platformIntegration()->clipboard());
+    if (clipboard) {
+        clipboard->setFromVncClient(mimeData, QClipboard::Clipboard);
+    } else {
+        delete mimeData;
     }
 }
 

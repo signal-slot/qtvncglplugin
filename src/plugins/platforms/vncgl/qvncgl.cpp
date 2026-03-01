@@ -3,6 +3,7 @@
 #include "qvncgl_p.h"
 #include "qvncglscreen.h"
 #include "qvncglclient.h"
+#include "qvncglclipboard.h"
 #include "QtNetwork/qtcpserver.h"
 #include "QtNetwork/qtcpsocket.h"
 #include <qendian.h>
@@ -10,6 +11,11 @@
 
 #include <QtGui/qguiapplication.h>
 #include <QtGui/QWindow>
+#include <QtGui/qclipboard.h>
+#include <QtGui/private/qguiapplication_p.h>
+#include <QMimeData>
+
+#include <zlib.h>
 
 #ifdef Q_OS_WIN
 #include <winsock2.h>
@@ -409,8 +415,9 @@ bool QRfbClientCutText::read(QTcpSocket *s)
 
     char tmp[3];
     s->read(tmp, 3);        // padding
-    s->read(reinterpret_cast<char *>(&length), 4);
-    length = ntohl(length);
+    quint32 rawLength;
+    s->read(reinterpret_cast<char *>(&rawLength), 4);
+    length = static_cast<qint32>(ntohl(rawLength));
 
     return true;
 }
@@ -642,6 +649,151 @@ void QVncGlServer::sendCutText(const QString &text)
     for (QVncGlClient *client : std::as_const(clients)) {
         if (client->isConnected())
             client->clientSocket()->write(message);
+    }
+}
+
+static void writeExtClipMessage(QTcpSocket *socket, const QByteArray &payload)
+{
+    char header[8];
+    header[0] = QVncGlServer::ServerCutText;
+    header[1] = header[2] = header[3] = 0; // padding
+    // Negative length signals extended clipboard
+    const qint32 negLen = -static_cast<qint32>(payload.size());
+    qToBigEndian(negLen, header + 4);
+    socket->write(header, 8);
+    socket->write(payload);
+}
+
+void QVncGlServer::sendExtClipCaps(QVncGlClient *client)
+{
+    // Caps message: flags(4) + [size(4) per format bit]
+    const quint32 formats = ExtClipFormat::Text | ExtClipFormat::HTML;
+    const quint32 actions = ExtClipAction::Caps | ExtClipAction::Request
+                          | ExtClipAction::Peek | ExtClipAction::Notify
+                          | ExtClipAction::Provide;
+    const quint32 flags = actions | formats;
+
+    // Count format bits to know how many size fields to send
+    int numFormats = 0;
+    for (int bit = 0; bit < 16; ++bit) {
+        if (formats & (1u << bit))
+            ++numFormats;
+    }
+
+    QByteArray payload(4 + numFormats * 4, Qt::Uninitialized);
+    char *p = payload.data();
+    qToBigEndian(flags, p);
+    p += 4;
+    // Max size 0 for each format = force notify/request/provide flow
+    for (int bit = 0; bit < 16; ++bit) {
+        if (formats & (1u << bit)) {
+            qToBigEndian(quint32(0), p);
+            p += 4;
+        }
+    }
+
+    writeExtClipMessage(client->clientSocket(), payload);
+}
+
+void QVncGlServer::sendExtClipNotify(QVncGlClient *client, quint32 formats)
+{
+    QByteArray payload(4, Qt::Uninitialized);
+    const quint32 flags = ExtClipAction::Notify | (formats & ExtClipFormat::Mask);
+    qToBigEndian(flags, payload.data());
+    writeExtClipMessage(client->clientSocket(), payload);
+}
+
+void QVncGlServer::sendExtClipRequest(QVncGlClient *client, quint32 formats)
+{
+    QByteArray payload(4, Qt::Uninitialized);
+    const quint32 flags = ExtClipAction::Request | (formats & ExtClipFormat::Mask);
+    qToBigEndian(flags, payload.data());
+    writeExtClipMessage(client->clientSocket(), payload);
+}
+
+void QVncGlServer::sendExtClipProvide(QVncGlClient *client, quint32 formats, const QMimeData *mimeData)
+{
+    // Build uncompressed data: for each format bit (low to high), U32 size + data
+    QByteArray uncompressed;
+    for (int bit = 0; bit < 16; ++bit) {
+        const quint32 fmt = 1u << bit;
+        if (!(formats & fmt))
+            continue;
+
+        QByteArray fmtData;
+        if (fmt == ExtClipFormat::Text && mimeData->hasText()) {
+            fmtData = mimeData->text().toUtf8();
+        } else if (fmt == ExtClipFormat::HTML && mimeData->hasHtml()) {
+            fmtData = mimeData->html().toUtf8();
+        } else {
+            continue;
+        }
+
+        // Append U32 size + data
+        char sizeBuf[4];
+        qToBigEndian(static_cast<quint32>(fmtData.size()), sizeBuf);
+        uncompressed.append(sizeBuf, 4);
+        uncompressed.append(fmtData);
+    }
+
+    if (uncompressed.isEmpty())
+        return;
+
+    // zlib compress
+    uLongf compressedSize = compressBound(uncompressed.size());
+    QByteArray compressed(4 + static_cast<int>(compressedSize), Qt::Uninitialized);
+    char *p = compressed.data();
+
+    const quint32 flags = ExtClipAction::Provide | (formats & ExtClipFormat::Mask);
+    qToBigEndian(flags, p);
+
+    if (compress2(reinterpret_cast<Bytef *>(p + 4), &compressedSize,
+                  reinterpret_cast<const Bytef *>(uncompressed.constData()),
+                  uncompressed.size(), Z_DEFAULT_COMPRESSION) != Z_OK) {
+        qWarning("QVncGlServer: zlib compress failed for extended clipboard provide");
+        return;
+    }
+
+    compressed.resize(4 + static_cast<int>(compressedSize));
+    writeExtClipMessage(client->clientSocket(), compressed);
+}
+
+void QVncGlServer::sendClipboardToClients(const QMimeData *mimeData)
+{
+    if (!mimeData)
+        return;
+
+    // Prepare legacy message once (Latin-1 text)
+    QByteArray legacyMessage;
+    if (mimeData->hasText()) {
+        const QByteArray latin1 = mimeData->text().toLatin1();
+        const quint32 length = latin1.size();
+        legacyMessage.resize(8 + length);
+        char *data = legacyMessage.data();
+        data[0] = ServerCutText;
+        data[1] = data[2] = data[3] = 0;
+        qToBigEndian(length, data + 4);
+        memcpy(data + 8, latin1.constData(), length);
+    }
+
+    for (QVncGlClient *client : std::as_const(clients)) {
+        if (!client->isConnected())
+            continue;
+
+        if (client->supportsExtClipboard()) {
+            // Determine available formats
+            quint32 formats = 0;
+            if (mimeData->hasText())
+                formats |= ExtClipFormat::Text;
+            if (mimeData->hasHtml())
+                formats |= ExtClipFormat::HTML;
+            // Filter by what client supports
+            formats &= client->clientClipFormats();
+            if (formats)
+                sendExtClipNotify(client, formats);
+        } else if (!legacyMessage.isEmpty()) {
+            client->clientSocket()->write(legacyMessage);
+        }
     }
 }
 

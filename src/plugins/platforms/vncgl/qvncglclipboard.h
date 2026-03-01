@@ -18,6 +18,7 @@ public:
 
     QMimeData *mimeData(QClipboard::Mode mode) override;
     void setMimeData(QMimeData *data, QClipboard::Mode mode) override;
+    void setFromVncClient(QMimeData *data, QClipboard::Mode mode);
     bool supportsMode(QClipboard::Mode mode) const override;
     bool ownsMode(QClipboard::Mode mode) const override;
 

@@ -38,8 +38,22 @@ void QVncGlClipboard::setMimeData(QMimeData *data, QClipboard::Mode mode)
     delete m_data;
     m_data = data;
 
-    if (m_data && m_data->hasText())
-        m_server->sendCutText(m_data->text());
+    if (m_data)
+        m_server->sendClipboardToClients(m_data);
+
+    emitChanged(mode);
+}
+
+void QVncGlClipboard::setFromVncClient(QMimeData *data, QClipboard::Mode mode)
+{
+    if (mode != QClipboard::Clipboard)
+        return;
+
+    if (data == m_data)
+        return;
+
+    delete m_data;
+    m_data = data;
 
     emitChanged(mode);
 }
