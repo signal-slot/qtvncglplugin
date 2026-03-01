@@ -8,7 +8,12 @@
 #include <QtCore/QCoreApplication>
 
 #include <qpa/qwindowsysteminterface.h>
+#include <qpa/qplatformintegration.h>
+#include <qpa/qplatformclipboard.h>
 #include <QtGui/qguiapplication.h>
+#include <QtGui/qclipboard.h>
+#include <QtGui/private/qguiapplication_p.h>
+#include <QMimeData>
 
 #ifdef Q_OS_WIN
 #include <winsock2.h>
@@ -595,11 +600,17 @@ void QVncGlClient::clientCutText()
     }
 
     if (m_cutTextPending && m_clientSocket->bytesAvailable() >= m_cutTextPending) {
-        char *text = new char [m_cutTextPending+1];
-        m_clientSocket->read(text, m_cutTextPending);
-        delete [] text;
+        QByteArray textData(m_cutTextPending, Qt::Uninitialized);
+        m_clientSocket->read(textData.data(), m_cutTextPending);
         m_cutTextPending = 0;
         m_handleMsg = false;
+
+        auto *clipboard = QGuiApplicationPrivate::platformIntegration()->clipboard();
+        if (clipboard) {
+            auto *mimeData = new QMimeData;
+            mimeData->setText(QString::fromLatin1(textData));
+            clipboard->setMimeData(mimeData, QClipboard::Clipboard);
+        }
     }
 }
 

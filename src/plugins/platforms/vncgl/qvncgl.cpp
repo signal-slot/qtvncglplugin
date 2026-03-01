@@ -627,6 +627,24 @@ void QVncGlServer::discardClient(QVncGlClient *client)
         qvnc_screen->setPowerState(QPlatformScreen::PowerStateOff);
 }
 
+void QVncGlServer::sendCutText(const QString &text)
+{
+    const QByteArray latin1 = text.toLatin1();
+    const quint32 length = latin1.size();
+
+    QByteArray message(8 + length, Qt::Uninitialized);
+    char *data = message.data();
+    data[0] = ServerCutText;
+    data[1] = data[2] = data[3] = 0; // padding
+    qToBigEndian(length, data + 4);
+    memcpy(data + 8, latin1.constData(), length);
+
+    for (QVncGlClient *client : std::as_const(clients)) {
+        if (client->isConnected())
+            client->clientSocket()->write(message);
+    }
+}
+
 inline QImage QVncGlServer::screenImage() const
 {
     return *qvnc_screen->image();

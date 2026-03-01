@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 #include "qvncglintegration.h"
+#include "qvncglclipboard.h"
 #include "qvncglscreen.h"
 #include "qvncglwindow.h"
 #include "qvncglbackingstore.h"
@@ -123,6 +124,13 @@ QPlatformServices *QVncGlIntegration::services() const
 QPlatformNativeInterface *QVncGlIntegration::nativeInterface() const
 {
     return m_nativeInterface.data();
+}
+
+QPlatformClipboard *QVncGlIntegration::clipboard() const
+{
+    if (!m_clipboard)
+        m_clipboard = std::make_unique<QVncGlClipboard>(m_server.get());
+    return m_clipboard.get();
 }
 
 QT_END_NAMESPACE

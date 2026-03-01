@@ -12,6 +12,7 @@ QT_BEGIN_NAMESPACE
 
 class QAbstractEventDispatcher;
 class QPlatformNativeInterface;
+class QVncGlClipboard;
 class QVncGlScreen;
 class QVncGlServer;
 
@@ -35,6 +36,7 @@ public:
     QPlatformInputContext *inputContext() const override { return m_inputContext.data(); }
 
     QPlatformNativeInterface *nativeInterface() const override;
+    QPlatformClipboard *clipboard() const override;
 
 private:
     QStringList m_paramList;
@@ -45,6 +47,7 @@ private:
     mutable QScopedPointer<QPlatformNativeInterface> m_nativeInterface;
     std::unique_ptr<QVncGlScreen> m_primaryScreen;
     std::unique_ptr<QVncGlServer> m_server;
+    mutable std::unique_ptr<QVncGlClipboard> m_clipboard;
 };
 
 QT_END_NAMESPACE

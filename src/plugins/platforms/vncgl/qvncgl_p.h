@@ -355,10 +355,11 @@ public:
     ~QVncGlServer();
 
     enum ServerMsg { FramebufferUpdate = 0,
-                     SetColourMapEntries = 1 };
+                     SetColourMapEntries = 1,
+                     ServerCutText = 3 };
 
     void setDirty();
-
+    void sendCutText(const QString &text);
 
     inline QVncGlScreen* screen() const { return qvnc_screen; }
     inline QVncGlDirtyMap* dirtyMap() const { return qvnc_screen->dirty; }

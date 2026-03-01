@@ -15,6 +15,7 @@ qt_add_plugin(QVncGlIntegrationPlugin
 target_sources(QVncGlIntegrationPlugin PRIVATE
     main.cpp
     qvncgl.cpp qvncgl_p.h
+    qvncglclipboard.cpp qvncglclipboard.h
     qvncglclient.cpp qvncglclient.h
     qvncglintegration.cpp qvncglintegration.h
     qvncglscreen.cpp qvncglscreen.h
