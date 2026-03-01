@@ -15,6 +15,7 @@
 #include <QtGui/qguiapplication.h>
 #include <QtGui/qclipboard.h>
 #include <QtGui/private/qguiapplication_p.h>
+#include <QBuffer>
 #include <QMimeData>
 
 #include <zlib.h>
@@ -720,6 +721,8 @@ void QVncGlClient::handleExtClipPeek()
         formats |= ExtClipFormat::Text;
     if (mimeData->hasHtml())
         formats |= ExtClipFormat::HTML;
+    if (mimeData->hasImage())
+        formats |= ExtClipFormat::DIB;
 
     if (formats)
         m_server->sendExtClipNotify(this, formats);
@@ -730,8 +733,8 @@ void QVncGlClient::handleExtClipNotify(quint32 flags)
     const quint32 formats = flags & ExtClipFormat::Mask;
     qCDebug(lcVncGl, "QVncGlClient: ext clip notify: formats=0x%04x", formats);
 
-    // Client says it has clipboard data — request Text and/or HTML
-    quint32 requestFormats = formats & (ExtClipFormat::Text | ExtClipFormat::HTML);
+    // Client says it has clipboard data — request Text, HTML and/or DIB
+    quint32 requestFormats = formats & (ExtClipFormat::Text | ExtClipFormat::HTML | ExtClipFormat::DIB);
     if (requestFormats)
         m_server->sendExtClipRequest(this, requestFormats);
 }
@@ -799,6 +802,25 @@ void QVncGlClient::handleExtClipProvide(quint32 flags, const QByteArray &payload
             mimeData->setText(QString::fromUtf8(fmtData));
         } else if (fmt == ExtClipFormat::HTML) {
             mimeData->setHtml(QString::fromUtf8(fmtData));
+        } else if (fmt == ExtClipFormat::DIB) {
+            // Build 14-byte BITMAPFILEHEADER + DIB data to form a complete BMP
+            if (fmtData.size() < 4)
+                continue;
+            const quint32 biSize = qFromLittleEndian<quint32>(fmtData.constData());
+            const quint32 pixelOffset = 14 + biSize;
+            const quint32 fileSize = 14 + static_cast<quint32>(fmtData.size());
+
+            QByteArray bmp(14, Qt::Uninitialized);
+            char *h = bmp.data();
+            h[0] = 'B'; h[1] = 'M';
+            qToLittleEndian(fileSize, h + 2);
+            h[6] = h[7] = h[8] = h[9] = 0;
+            qToLittleEndian(pixelOffset, h + 10);
+            bmp.append(fmtData);
+
+            QImage img;
+            if (img.loadFromData(bmp, "BMP"))
+                mimeData->setImageData(img);
         }
     }
 

@@ -13,6 +13,7 @@
 #include <QtGui/QWindow>
 #include <QtGui/qclipboard.h>
 #include <QtGui/private/qguiapplication_p.h>
+#include <QBuffer>
 #include <QMimeData>
 
 #include <zlib.h>
@@ -667,7 +668,7 @@ static void writeExtClipMessage(QTcpSocket *socket, const QByteArray &payload)
 void QVncGlServer::sendExtClipCaps(QVncGlClient *client)
 {
     // Caps message: flags(4) + [size(4) per format bit]
-    const quint32 formats = ExtClipFormat::Text | ExtClipFormat::HTML;
+    const quint32 formats = ExtClipFormat::Text | ExtClipFormat::HTML | ExtClipFormat::DIB;
     const quint32 actions = ExtClipAction::Caps | ExtClipAction::Request
                           | ExtClipAction::Peek | ExtClipAction::Notify
                           | ExtClipAction::Provide;
@@ -725,6 +726,18 @@ void QVncGlServer::sendExtClipProvide(QVncGlClient *client, quint32 formats, con
             fmtData = mimeData->text().toUtf8();
         } else if (fmt == ExtClipFormat::HTML && mimeData->hasHtml()) {
             fmtData = mimeData->html().toUtf8();
+        } else if (fmt == ExtClipFormat::DIB && mimeData->hasImage()) {
+            QImage img = qvariant_cast<QImage>(mimeData->imageData());
+            if (img.isNull())
+                continue;
+            QBuffer buf(&fmtData);
+            buf.open(QIODevice::WriteOnly);
+            img.save(&buf, "BMP");
+            buf.close();
+            // Strip 14-byte BITMAPFILEHEADER to get DIB
+            if (fmtData.size() <= 14)
+                continue;
+            fmtData.remove(0, 14);
         } else {
             continue;
         }
@@ -787,6 +800,8 @@ void QVncGlServer::sendClipboardToClients(const QMimeData *mimeData)
                 formats |= ExtClipFormat::Text;
             if (mimeData->hasHtml())
                 formats |= ExtClipFormat::HTML;
+            if (mimeData->hasImage())
+                formats |= ExtClipFormat::DIB;
             // Filter by what client supports
             formats &= client->clientClipFormats();
             if (formats)
