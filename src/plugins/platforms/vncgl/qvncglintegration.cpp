@@ -42,6 +42,11 @@ QVncGlIntegration::QVncGlIntegration(const QStringList &paramList)
         if (arg.contains(portRx, &match))
             m_port = match.captured(1).toInt();
     }
+
+    bool ok;
+    int envPort = qEnvironmentVariableIntValue("QT_VNC_PORT", &ok);
+    if (ok)
+        m_port = envPort;
 }
 
 QVncGlIntegration::~QVncGlIntegration()
