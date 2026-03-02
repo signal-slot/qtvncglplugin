@@ -221,7 +221,7 @@ void QVncGlScreen::updateFromOpenGL()
     m_glFunctions->glReadPixels(0, 0, size.width(), size.height(), GL_RGBA,
                                 GL_UNSIGNED_BYTE, m_readbackBuffer.bits());
 
-    QImage converted = m_readbackBuffer.mirrored().convertToFormat(QImage::Format_ARGB32);
+    QImage converted = m_readbackBuffer.flipped(Qt::Vertical).convertToFormat(QImage::Format_ARGB32);
     m_framebuffer = converted;
     dirtyRegion = QRect(QPoint(0, 0), size);
     if (vncServer)
