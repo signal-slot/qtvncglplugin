@@ -372,7 +372,7 @@ class QVncGlServer : public QObject
 {
     Q_OBJECT
 public:
-    QVncGlServer(QVncGlScreen *screen, quint16 port = 5900);
+    QVncGlServer(QVncGlScreen *screen, quint16 port = 15900, bool autoPort = false);
     ~QVncGlServer();
 
     enum ServerMsg { FramebufferUpdate = 0,
@@ -401,6 +401,7 @@ private:
     QList<QVncGlClient*> clients;
     QVncGlScreen *qvnc_screen;
     quint16 m_port;
+    bool m_autoPort;
 };
 
 QT_END_NAMESPACE

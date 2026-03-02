@@ -40,7 +40,8 @@ public:
 
 private:
     QStringList m_paramList;
-    int m_port = 5900;
+    int m_port = 15900;
+    bool m_portSpecified = false;
     QScopedPointer<QPlatformFontDatabase> m_fontDb;
     QScopedPointer<QPlatformInputContext> m_inputContext;
     mutable QScopedPointer<QPlatformServices> m_services;

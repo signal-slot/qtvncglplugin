@@ -581,9 +581,10 @@ uint QVncGlClientCursor::removeClient(QVncGlClient *client)
 }
 #endif // QT_CONFIG(cursor)
 
-QVncGlServer::QVncGlServer(QVncGlScreen *screen, quint16 port)
+QVncGlServer::QVncGlServer(QVncGlScreen *screen, quint16 port, bool autoPort)
     : qvnc_screen(screen)
     , m_port(port)
+    , m_autoPort(autoPort)
 {
     QMetaObject::invokeMethod(this, "init", Qt::QueuedConnection);
 }
@@ -591,13 +592,19 @@ QVncGlServer::QVncGlServer(QVncGlScreen *screen, quint16 port)
 void QVncGlServer::init()
 {
     serverSocket = new QTcpServer(this);
-    if (!serverSocket->listen(QHostAddress::Any, m_port))
-        qWarning() << "QVncGlServer could not connect:" << serverSocket->errorString();
-    else
+    if (m_autoPort) {
+        while (!serverSocket->listen(QHostAddress::Any, m_port)) {
+            ++m_port;
+        }
         qWarning("QVncGlServer created on port %d", m_port);
+    } else {
+        if (!serverSocket->listen(QHostAddress::Any, m_port))
+            qWarning() << "QVncGlServer could not connect:" << serverSocket->errorString();
+        else
+            qWarning("QVncGlServer created on port %d", m_port);
+    }
 
     connect(serverSocket, SIGNAL(newConnection()), this, SLOT(newConnection()));
-
 }
 
 QVncGlServer::~QVncGlServer()

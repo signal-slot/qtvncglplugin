@@ -39,14 +39,18 @@ QVncGlIntegration::QVncGlIntegration(const QStringList &paramList)
     QRegularExpression portRx("port=(\\d+)"_L1);
     for (const QString &arg : paramList) {
         QRegularExpressionMatch match;
-        if (arg.contains(portRx, &match))
+        if (arg.contains(portRx, &match)) {
             m_port = match.captured(1).toInt();
+            m_portSpecified = true;
+        }
     }
 
     bool ok;
     int envPort = qEnvironmentVariableIntValue("QT_VNC_PORT", &ok);
-    if (ok)
+    if (ok) {
         m_port = envPort;
+        m_portSpecified = true;
+    }
 }
 
 QVncGlIntegration::~QVncGlIntegration()
@@ -60,7 +64,7 @@ void QVncGlIntegration::initialize()
     m_primaryScreen.reset(new QVncGlScreen(m_paramList));
     if (m_primaryScreen->initialize()) {
         QWindowSystemInterface::handleScreenAdded(m_primaryScreen.get());
-        m_server = std::make_unique<QVncGlServer>(m_primaryScreen.get(), m_port);
+        m_server = std::make_unique<QVncGlServer>(m_primaryScreen.get(), m_port, !m_portSpecified);
         m_primaryScreen->vncServer = m_server.get();
     } else {
         qWarning("vncgl: Failed to initialize screen");
