@@ -51,15 +51,31 @@ Run any Qt application with the `vncgl` platform:
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `port=N` | VNC server listen port | 5900 |
+| `port=N` | VNC server listen port | 15900 (auto-detect) |
 | `size=WxH` | Initial screen resolution (resizes to match window) | 1024x768 |
 | `mmsize=WxH` | Physical screen size in mm | auto (96 dpi) |
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `QT_VNC_PORT` | Override VNC server listen port (takes precedence over `port=N` parameter) |
+
+### Port Selection
+
+When no port is specified (neither `port=N` parameter nor `QT_VNC_PORT`), the server automatically scans for an available port starting from 15900. When a port is explicitly specified, only that port is used.
 
 ### Examples
 
 ```bash
-# Run with custom port
+# Run with default auto-detect port (starting from 15900)
+./your_app -platform vncgl
+
+# Run with custom port via platform parameter
 ./your_app -platform vncgl:port=5910
+
+# Run with custom port via environment variable
+QT_VNC_PORT=5910 ./your_app -platform vncgl
 
 # Run with explicit initial resolution
 ./your_app -platform vncgl:port=5910:size=1920x1080
@@ -68,7 +84,7 @@ Run any Qt application with the `vncgl` platform:
 ./your_app -platform vncgl:port=5910 --opengl
 ```
 
-Connect with any VNC client (e.g., TigerVNC, RealVNC) to `localhost:5910`.
+Connect with any VNC client (e.g., TigerVNC, RealVNC) to `localhost:<port>`.
 
 ## License
 
