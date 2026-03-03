@@ -577,6 +577,10 @@ void QVncGlClient::pointerEvent()
             type = QEvent::MouseButtonRelease;
         QWindowSystemInterface::handleMouseEvent(nullptr, pos, pos, ev.buttons, Qt::MouseButton(buttonStateChange),
                                                  type, QGuiApplication::keyboardModifiers());
+        if (type == QEvent::MouseButtonPress) {
+            if (QWindow *w = QGuiApplication::topLevelAt(pos.toPoint()))
+                QWindowSystemInterface::handleFocusWindowChanged(w);
+        }
         buttonState = int(ev.buttons);
         m_handleMsg = false;
     }
